@@ -118,18 +118,33 @@ def ai_chat(question, embeddings, sequences, top_k=5):
    def ai_chat(question, embeddings, sequences, top_k=5):
     if embeddings is None or len(sequences) == 0:
         return "No sequences available to answer."
-    
+
     model = SentenceTransformer('all-MiniLM-L6-v2')
     q_emb = model.encode([question])
     sims = cosine_similarity(q_emb, embeddings)[0]
     top_idx = np.argsort(sims)[-top_k:][::-1]
     context = "\n".join([sequences[i] for i in top_idx])
 
-    # ✅ Corrected triple-quoted f-string
+    # Properly closed triple-quoted f-string
     prompt = f"""You are an intelligent eDNA assistant.
 Use ONLY the context below to answer questions.
 CONTEXT:
 {context}
+
+Previous chats: {st.session_state['chat_history']}
+
+QUESTION:
+{question}"""
+
+    # Updated OpenAI API call
+    response = openai.chat.completions.create(
+        model="gpt-4",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0
+    )
+    answer = response.choices[0].message.content
+    st.session_state['chat_history'].append({"Q": question, "A": answer})
+    return answer
 
 Previous chats: {st.session_state['chat_history']}
 
