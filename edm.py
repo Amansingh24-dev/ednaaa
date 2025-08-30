@@ -1,20 +1,17 @@
 import streamlit as st
 from Bio import SeqIO
 from Bio.SeqUtils import molecular_weight, GC
-from Bio.Blast import NCBIWWW, NCBIXML
 import pandas as pd
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 from sentence_transformers import SentenceTransformer
-import matplotlib.pyplot as plt
 import io
-from scipy.cluster.hierarchy import linkage, dendrogram
 import openai
 
 # -----------------------------
 # OpenAI API Key
 # -----------------------------
-openai.api_key = st.secrets["OPENAI_API_KEY"]
+openai.api_key = st.secrets.get("OPENAI_API_KEY", "")
 
 # -----------------------------
 # Page Config
@@ -30,7 +27,9 @@ st.title("🧬 AI-Powered eDNA Platform for Biodiversity Assessment")
 # -----------------------------
 st.sidebar.header("Upload FASTA/FA Files")
 uploaded_files = st.sidebar.file_uploader(
-    "Upload your sequences (DNA, RNA, Protein)", type=["fasta", "fa"], accept_multiple_files=True
+    "Upload your sequences (DNA, RNA, Protein)",
+    type=["fasta", "fa"],
+    accept_multiple_files=True
 )
 
 # -----------------------------
@@ -71,10 +70,9 @@ else:
     st.subheader(f"Dataset Preview ({len(df)} sequences)")
     st.dataframe(df.head())
 
-# -----------------------------
-# Tabs: Stats, AI, BLAST, Tree
-# -----------------------------
-if not df.empty:
+    # -----------------------------
+    # Tabs: Stats, AI, BLAST, Tree, Biodiversity
+    # -----------------------------
     tabs = st.tabs(["📊 Stats", "💬 AI Chatbot", "🔬 BLAST", "🌳 Phylogenetic Tree", "📈 Biodiversity"])
 
     # -----------------------------
@@ -82,7 +80,13 @@ if not df.empty:
     # -----------------------------
     with tabs[0]:
         st.subheader("Sequence Statistics")
-        st.write(df.describe(include='all'))
+        st.dataframe(df.describe(include='all'))
+        st.markdown("### Top 10 Longest Sequences")
+        st.bar_chart(df.sort_values("Length", ascending=False).head(10)[["Length"]])
+
+        # Download options
+        csv_data = df.to_csv(index=False).encode('utf-8')
+        st.download_button("Download CSV", csv_data, "edna_sequences.csv", "text/csv")
 
     # -----------------------------
     # AI Chatbot Tab
@@ -99,30 +103,35 @@ if not df.empty:
 
         embeddings = embed_sequences(df['Sequence'].tolist())
         user_question = st.text_input("Ask questions about your sequences")
-        
+
         def ai_chat(question, top_k=5):
-            model = SentenceTransformer('all-MiniLM-L6-v2')
-            q_emb = model.encode([question])
-            sims = cosine_similarity(q_emb, embeddings)[0]
-            top_idx = np.argsort(sims)[-top_k:][::-1]
-            context = "\n".join([df['Sequence'].iloc[i] for i in top_idx])
-            prompt = f"""
-You are an AI assistant for eDNA.
-Use only the following sequences:
+            try:
+                model = SentenceTransformer('all-MiniLM-L6-v2')
+                q_emb = model.encode([question])
+                sims = cosine_similarity(q_emb, embeddings)[0]
+                top_idx = np.argsort(sims)[-top_k:][::-1]
+                context = "\n".join([df['Sequence'].iloc[i] for i in top_idx])
+                prompt = f"""
+You are an AI assistant for eDNA sequences.
+Use ONLY the following sequences:
 {context}
 
 Previous chats: {st.session_state['chat_history']}
 Question: {question}
 """
-            response = openai.ChatCompletion.create(
-                model="gpt-3.5-turbo",
-                messages=[{"role": "system", "content": prompt}]
-            )
-            return response.choices[0].message.content
+                response = openai.ChatCompletion.create(
+                    model="gpt-3.5-turbo",
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0
+                )
+                answer = response.choices[0].message.content
+                st.session_state['chat_history'].append(f"Q: {question}\nA: {answer}")
+                return answer
+            except Exception as e:
+                return f"OpenAI API Error: {e}"
 
         if user_question:
             answer = ai_chat(user_question)
-            st.session_state['chat_history'].append(f"Q: {user_question}\nA: {answer}")
             st.text_area("Chat History", "\n\n".join(st.session_state['chat_history']), height=300)
 
     # -----------------------------
