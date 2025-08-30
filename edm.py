@@ -63,8 +63,29 @@ if 'species' in df.columns:
     if species_filter:
         df = df[df['species'].isin(species_filter)]
 if 'year' in df.columns:
-    year_filter = st.sidebar.slider("Year range", int(df['year'].min()), int(df['year'].max()), (int(df['year'].min()), int(df['year'].max())))
-    df = df[df['year'].between(*year_filter)]
+   # ---- Year Filter (Fixed) ----
+if 'year' in df.columns:
+    # Ensure numeric
+    df['year'] = pd.to_numeric(df['year'], errors='coerce')
+    df = df.dropna(subset=['year'])
+
+    if not df.empty:
+        min_year = int(df['year'].min())
+        max_year = int(df['year'].max())
+
+        if min_year < max_year:
+            year_filter = st.sidebar.slider(
+                "Year range",
+                min_value=min_year,
+                max_value=max_year,
+                value=(min_year, max_year)
+            )
+            df = df[df['year'].between(*year_filter)]
+        else:
+            st.sidebar.info(f"📌 Only one year available: {min_year}")
+    else:
+        st.sidebar.warning("⚠️ No valid year data found")
+
 
 # -----------------------------
 # PCA & Map
