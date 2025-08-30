@@ -15,92 +15,92 @@ openai.api_key = st.secrets.get("OPENAI_API_KEY", "")
 # -----------------------------
 # Page Config
 # -----------------------------
-st.set_page_config(page_title="AI eDNA FASTA Analysis", layout="wide")
+st.set_page_config(
+    page_title="🌐 AI-Powered eDNA Worldwide Analysis",
+    layout="wide",
+)
 st.title("🧬 AI-Powered eDNA FASTA Analysis Platform")
 
 # -----------------------------
-# File Upload
+# Sidebar - File Upload
 # -----------------------------
-st.sidebar.header("Upload FASTA files")
+st.sidebar.header("Upload FASTA Files")
 uploaded_files = st.sidebar.file_uploader(
-    "Upload your FASTA sequences", type=["fasta", "fa"], accept_multiple_files=True
+    "Upload your FASTA sequences (FASTA/FA)",
+    type=["fasta", "fa"],
+    accept_multiple_files=True
 )
 
 # -----------------------------
 # Parse FASTA
 # -----------------------------
-def parse_fasta(uploaded_file):
-    fasta_text = io.StringIO(uploaded_file.getvalue().decode("utf-8"))
-    records = list(SeqIO.parse(fasta_text, "fasta"))
-    
-    data = {
-        "id": [rec.id for rec in records],
-        "description": [rec.description for rec in records],
-        "sequence": [str(rec.seq) for rec in records],
-        "length": [len(rec.seq) for rec in records],
-        "GC_content": [100 * (rec.seq.count("G") + rec.seq.count("C")) / len(rec.seq) for rec in records]
-    }
-    return pd.DataFrame(data)
+def parse_fasta(file):
+    try:
+        fasta_text = io.StringIO(file.getvalue().decode("utf-8"))
+        records = list(SeqIO.parse(fasta_text, "fasta"))
+        if not records:
+            return pd.DataFrame()
+        data = {
+            "ID": [rec.id for rec in records],
+            "Description": [rec.description for rec in records],
+            "Sequence": [str(rec.seq) for rec in records],
+            "Length": [len(rec.seq) for rec in records],
+            "GC_Content": [100 * (rec.seq.count("G") + rec.seq.count("C")) / len(rec.seq) for rec in records]
+        }
+        return pd.DataFrame(data)
+    except Exception as e:
+        st.error(f"Error parsing {file.name}: {e}")
+        return pd.DataFrame()
 
 # -----------------------------
-# Load Data
+# Load & Combine Data
 # -----------------------------
-dfs = []
-if uploaded_files:
-    for f in uploaded_files:
-        dfs.append(parse_fasta(f))
-    df = pd.concat(dfs, ignore_index=True)
-    st.subheader(f"Combined FASTA Dataset Preview ({len(df)} sequences)")
-    st.dataframe(df.head())
+dfs = [parse_fasta(f) for f in uploaded_files] if uploaded_files else []
+df = pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
+
+if df.empty:
+    st.warning("Upload at least one valid FASTA file to begin analysis.")
 else:
-    df = pd.DataFrame()
-    st.warning("Please upload at least one FASTA file.")
+    st.subheader(f"Combined Dataset Preview ({len(df)} sequences)")
+    st.dataframe(df.head())
 
 # -----------------------------
-# Sequence Filters
+# Filters
 # -----------------------------
-st.sidebar.subheader("Filters")
 if not df.empty:
-    min_len = int(df['length'].min())
-    max_len = int(df['length'].max())
-    
-    if min_len == max_len:
-        st.sidebar.write(f"All sequences have length: {min_len}")
-        length_filter = (min_len, max_len)
-    else:
-        length_filter = st.sidebar.slider(
-            "Sequence length range", 
-            min_value=min_len, 
-            max_value=max_len, 
-            value=(min_len, max_len)
+    st.sidebar.subheader("Sequence Filters")
+    min_len, max_len = int(df['Length'].min()), int(df['Length'].max())
+    if min_len != max_len:
+        length_range = st.sidebar.slider(
+            "Sequence length range", min_len, max_len, (min_len, max_len)
         )
-    df = df[df['length'].between(*length_filter)]
+        df = df[df['Length'].between(*length_range)]
+    st.sidebar.write(f"GC Content range: {df['GC_Content'].min():.2f}% - {df['GC_Content'].max():.2f}%")
 
 # -----------------------------
 # Quick Stats
 # -----------------------------
 if not df.empty:
     st.subheader("📊 Sequence Statistics")
-    st.write(f"Total sequences: {len(df)}")
-    st.write(f"Average length: {df['length'].mean():.2f}")
-    st.write(f"Average GC content: {df['GC_content'].mean():.2f}%")
-
+    st.markdown(f"- Total sequences: **{len(df)}**")
+    st.markdown(f"- Average length: **{df['Length'].mean():.2f}**")
+    st.markdown(f"- Average GC content: **{df['GC_Content'].mean():.2f}%**")
+    
     st.subheader("Top 20 Longest Sequences")
-    st.bar_chart(df.sort_values("length", ascending=False).head(20)[["length"]])
+    st.bar_chart(df.sort_values("Length", ascending=False).head(20)[["Length"]])
 
 # -----------------------------
-# Embeddings for AI Chatbot
+# Embeddings
 # -----------------------------
 @st.cache_resource
 def embed_sequences(sequences):
     model = SentenceTransformer('all-MiniLM-L6-v2')
-    embeddings = model.encode(sequences, show_progress_bar=True)
-    return embeddings
+    return model.encode(sequences, show_progress_bar=True)
 
-embeddings = embed_sequences(df['sequence'].tolist()) if not df.empty else None
+embeddings = embed_sequences(df['Sequence'].tolist()) if not df.empty else None
 
 # -----------------------------
-# Persistent AI Memory and Chat Function
+# AI Chatbot
 # -----------------------------
 if 'chat_history' not in st.session_state:
     st.session_state['chat_history'] = []
@@ -108,16 +108,15 @@ if 'chat_history' not in st.session_state:
 def ai_chat(question, embeddings, sequences, top_k=5):
     if embeddings is None or len(sequences) == 0:
         return "No sequences available to answer."
-
-    # Encode question and compute similarity
+    
     model = SentenceTransformer('all-MiniLM-L6-v2')
     q_emb = model.encode([question])
     sims = cosine_similarity(q_emb, embeddings)[0]
     top_idx = np.argsort(sims)[-top_k:][::-1]
     context = "\n".join([sequences[i] for i in top_idx])
-
-    # Properly closed f-string prompt
-    prompt = f"""You are an intelligent eDNA assistant.
+    
+    prompt = f"""
+You are an intelligent eDNA assistant.
 Use ONLY the context below to answer questions.
 CONTEXT:
 {context}
@@ -125,35 +124,42 @@ CONTEXT:
 Previous chats: {st.session_state['chat_history']}
 
 QUESTION:
-{question}"""
-
-    # OpenAI API call
-    response = openai.chat.completions.create(
-        model="gpt-4",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0
-    )
-    answer = response.choices[0].message.content
-    st.session_state['chat_history'].append({"Q": question, "A": answer})
-    return answer
+{question}
+"""
+    try:
+        response = openai.chat.completions.create(
+            model="gpt-4",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0
+        )
+        answer = response.choices[0].message.content
+        st.session_state['chat_history'].append({"Q": question, "A": answer})
+        return answer
+    except Exception as e:
+        return f"OpenAI API Error: {e}"
 
 # -----------------------------
 # AI Chatbot UI
 # -----------------------------
 st.subheader("💬 AI Chatbot for eDNA Sequences")
-user_question = st.text_input("Ask the AI about your sequences")
+user_question = st.text_input("Ask questions about your sequences")
 if uploaded_files and user_question:
-    answer = ai_chat(user_question, embeddings, df['sequence'].tolist())
-    st.write("**AI Answer:**", answer)
+    answer = ai_chat(user_question, embeddings, df['Sequence'].tolist())
+    st.markdown(f"**AI Answer:** {answer}")
 
 # -----------------------------
 # Downloadable Results
 # -----------------------------
 if not df.empty:
-    csv = df.to_csv(index=False).encode('utf-8')
     st.download_button(
         label="Download Dataset CSV",
-        data=csv,
-        file_name='edna_fasta_analysis.csv',
-        mime='text/csv',
+        data=df.to_csv(index=False).encode('utf-8'),
+        file_name='edna_analysis.csv',
+        mime='text/csv'
+    )
+    st.download_button(
+        label="Download Dataset Excel",
+        data=df.to_excel(index=False, engine='openpyxl'),
+        file_name='edna_analysis.xlsx',
+        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     )
