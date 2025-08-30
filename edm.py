@@ -150,16 +150,30 @@ if uploaded_files and user_question:
 # -----------------------------
 # Downloadable Results
 # -----------------------------
+import io
+
+# -----------------------------
+# Downloadable Results
+# -----------------------------
 if not df.empty:
+    # CSV
+    csv_data = df.to_csv(index=False).encode('utf-8')
     st.download_button(
         label="Download Dataset CSV",
-        data=df.to_csv(index=False).encode('utf-8'),
+        data=csv_data,
         file_name='edna_analysis.csv',
         mime='text/csv'
     )
+
+    # Excel
+    excel_buffer = io.BytesIO()
+    with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='eDNA_Analysis')
+    excel_buffer.seek(0)  # Move pointer to the start
+
     st.download_button(
         label="Download Dataset Excel",
-        data=df.to_excel(index=False, engine='openpyxl'),
+        data=excel_buffer,
         file_name='edna_analysis.xlsx',
         mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     )
