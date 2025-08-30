@@ -99,14 +99,14 @@ if not df.empty:
 
         embeddings = embed_sequences(df['Sequence'].tolist())
         user_question = st.text_input("Ask questions about your sequences")
-        if user_question:
-            def ai_chat(question):
-                model = SentenceTransformer('all-MiniLM-L6-v2')
-                q_emb = model.encode([question])
-                sims = cosine_similarity(q_emb, embeddings)[0]
-                top_idx = np.argsort(sims)[-5:][::-1]
-                context = "\n".join([df['Sequence'].iloc[i] for i in top_idx])
-                prompt = f"""
+        
+        def ai_chat(question, top_k=5):
+            model = SentenceTransformer('all-MiniLM-L6-v2')
+            q_emb = model.encode([question])
+            sims = cosine_similarity(q_emb, embeddings)[0]
+            top_idx = np.argsort(sims)[-top_k:][::-1]
+            context = "\n".join([df['Sequence'].iloc[i] for i in top_idx])
+            prompt = f"""
 You are an AI assistant for eDNA.
 Use only the following sequences:
 {context}
@@ -114,5 +114,34 @@ Use only the following sequences:
 Previous chats: {st.session_state['chat_history']}
 Question: {question}
 """
-                try:
-                    response = openai.chat.
+            response = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                messages=[{"role": "system", "content": prompt}]
+            )
+            return response.choices[0].message.content
+
+        if user_question:
+            answer = ai_chat(user_question)
+            st.session_state['chat_history'].append(f"Q: {user_question}\nA: {answer}")
+            st.text_area("Chat History", "\n\n".join(st.session_state['chat_history']), height=300)
+
+    # -----------------------------
+    # BLAST Tab (Placeholder)
+    # -----------------------------
+    with tabs[2]:
+        st.subheader("BLAST Search")
+        st.info("BLAST functionality coming soon...")
+
+    # -----------------------------
+    # Phylogenetic Tree Tab (Placeholder)
+    # -----------------------------
+    with tabs[3]:
+        st.subheader("Phylogenetic Tree")
+        st.info("Phylogenetic tree construction coming soon...")
+
+    # -----------------------------
+    # Biodiversity Tab (Placeholder)
+    # -----------------------------
+    with tabs[4]:
+        st.subheader("Biodiversity Analysis")
+        st.info("Biodiversity analysis coming soon...")
