@@ -116,7 +116,7 @@ def ai_chat(question, embeddings, sequences, top_k=5):
     context = "\n".join([sequences[i] for i in top_idx])
     
    def ai_chat(question, embeddings, sequences, top_k=5):
-    if embeddings is None or len(sequences) == 0:
+     if embeddings is None or len(sequences) == 0:
         return "No sequences available to answer."
 
     model = SentenceTransformer('all-MiniLM-L6-v2')
