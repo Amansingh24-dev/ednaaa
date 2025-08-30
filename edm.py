@@ -1,152 +1,87 @@
 import streamlit as st
+from Bio import SeqIO
 import pandas as pd
-import requests
-from sklearn.decomposition import PCA
-import matplotlib.pyplot as plt
-import seaborn as sns
-import plotly.express as px
-import openai
+import numpy as np
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
-import numpy as np
-from collections import defaultdict
+import openai
 
 # -----------------------------
 # OpenAI API Key
 # -----------------------------
-openai.api_key = st.secrets["OPENAI_API_KEY"]  # store safely as secret
+openai.api_key = st.secrets.get("OPENAI_API_KEY", "")
 
 # -----------------------------
-# Page config
+# Page Config
 # -----------------------------
-st.set_page_config(page_title="Advanced AI eDNA Platform", layout="wide")
-st.title("🌏 Advanced AI-Powered eDNA Analysis Platform")
+st.set_page_config(page_title="AI eDNA FASTA Analysis", layout="wide")
+st.title("🧬 AI-Powered eDNA FASTA Analysis Platform")
 
 # -----------------------------
-# Sidebar - Multi Dataset Support
+# File Upload
 # -----------------------------
-st.sidebar.header("Settings")
+st.sidebar.header("Upload FASTA files")
 uploaded_files = st.sidebar.file_uploader(
-    "Upload your CSV datasets", type=["csv"], accept_multiple_files=True
+    "Upload your FASTA sequences", type=["fasta", "fa"], accept_multiple_files=True
 )
-country = st.sidebar.text_input("Country code for GBIF API", "IN")
-limit = st.sidebar.slider("Number of records (GBIF API)", 10, 500, 50)
 
 # -----------------------------
-# Load or Fetch Dataset
+# Parse FASTA
 # -----------------------------
-@st.cache_data
-def fetch_gbif_data(country, limit):
-    url = f"https://api.gbif.org/v1/occurrence/search?country={country}&limit={limit}"
-    response = requests.get(url).json()
-    data = response.get('results', [])
-    df = pd.DataFrame(data)
-    return df
+def parse_fasta(file):
+    records = list(SeqIO.parse(file, "fasta"))
+    data = {
+        "id": [rec.id for rec in records],
+        "description": [rec.description for rec in records],
+        "sequence": [str(rec.seq) for rec in records],
+        "length": [len(rec.seq) for rec in records],
+        "GC_content": [100 * (rec.seq.count("G") + rec.seq.count("C")) / len(rec.seq) for rec in records]
+    }
+    return pd.DataFrame(data)
 
 dfs = []
 if uploaded_files:
     for f in uploaded_files:
-        dfs.append(pd.read_csv(f))
+        dfs.append(parse_fasta(f))
+    df = pd.concat(dfs, ignore_index=True)
+    st.subheader(f"Combined FASTA Dataset Preview ({len(df)} sequences)")
+    st.dataframe(df.head())
 else:
-    dfs.append(fetch_gbif_data(country, limit))
-
-df = pd.concat(dfs, ignore_index=True)
-st.subheader(f"Combined Dataset Preview ({len(df)} records)")
-st.dataframe(df.head())
+    st.warning("Please upload at least one FASTA file.")
 
 # -----------------------------
-# Interactive Filters
+# Sequence Filters
 # -----------------------------
 st.sidebar.subheader("Filters")
-if 'species' in df.columns:
-    species_filter = st.sidebar.multiselect("Select species", df['species'].dropna().unique())
-    if species_filter:
-        df = df[df['species'].isin(species_filter)]
-if 'year' in df.columns:
-   # ---- Year Filter (Fixed) ----
- if 'year' in df.columns:
-    # Ensure numeric
-    df['year'] = pd.to_numeric(df['year'], errors='coerce')
-    df = df.dropna(subset=['year'])
-
-    if not df.empty:
-        min_year = int(df['year'].min())
-        max_year = int(df['year'].max())
-
-        if min_year < max_year:
-            year_filter = st.sidebar.slider(
-                "Year range",
-                min_value=min_year,
-                max_value=max_year,
-                value=(min_year, max_year)
-            )
-            df = df[df['year'].between(*year_filter)]
-        else:
-            st.sidebar.info(f"📌 Only one year available: {min_year}")
-    else:
-        st.sidebar.warning("⚠️ No valid year data found")
-
+if uploaded_files:
+    min_len = int(df['length'].min())
+    max_len = int(df['length'].max())
+    length_filter = st.sidebar.slider("Sequence length range", min_value=min_len, max_value=max_len, value=(min_len, max_len))
+    df = df[df['length'].between(*length_filter)]
 
 # -----------------------------
-# PCA & Map
+# Quick Stats
 # -----------------------------
-if 'decimalLatitude' in df.columns and 'decimalLongitude' in df.columns:
-    coords = df[['decimalLatitude','decimalLongitude']].fillna(0)
-    pca = PCA(n_components=2)
-    df_pca = pd.DataFrame(pca.fit_transform(coords), columns=['PC1','PC2'])
-    
-    st.subheader("PCA Plot of Locations")
-    plt.figure(figsize=(6,4))
-    sns.scatterplot(x='PC1', y='PC2', data=df_pca)
-    st.pyplot(plt)
-    
-    st.subheader("Interactive Map")
-    fig = px.scatter_mapbox(df, lat='decimalLatitude', lon='decimalLongitude',
-                            hover_name='species', zoom=1, height=400)
-    fig.update_layout(mapbox_style="open-street-map")
-    st.plotly_chart(fig)
+if uploaded_files:
+    st.subheader("📊 Sequence Statistics")
+    st.write(f"Total sequences: {len(df)}")
+    st.write(f"Average length: {df['length'].mean():.2f}")
+    st.write(f"Average GC content: {df['GC_content'].mean():.2f}%")
 
-# -----------------------------
-# Biodiversity Metrics
-# -----------------------------
-def shannon_diversity(series):
-    counts = series.value_counts()
-    proportions = counts / counts.sum()
-    return -sum(proportions * np.log(proportions))
-
-def simpson_diversity(series):
-    counts = series.value_counts()
-    proportions = counts / counts.sum()
-    return 1 - sum(proportions**2)
-
-st.subheader("🌿 Biodiversity Metrics")
-if 'species' in df.columns:
-    richness = df['species'].nunique()
-    shannon = shannon_diversity(df['species'])
-    simpson = simpson_diversity(df['species'])
-    st.write(f"Species Richness: {richness}")
-    st.write(f"Shannon Diversity Index: {shannon:.3f}")
-    st.write(f"Simpson Diversity Index: {simpson:.3f}")
-
-# -----------------------------
-# Temporal Trends
-# -----------------------------
-if 'year' in df.columns:
-    st.subheader("📈 Temporal Trends of Species Occurrence")
-    temporal = df.groupby('year')['species'].nunique()
-    st.line_chart(temporal)
+    st.subheader("Top 20 Longest Sequences")
+    st.bar_chart(df.sort_values("length", ascending=False).head(20)[["length"]])
 
 # -----------------------------
 # Embeddings for AI Chatbot
 # -----------------------------
 @st.cache_resource
-def embed_dataset(df):
+def embed_sequences(sequences):
     model = SentenceTransformer('all-MiniLM-L6-v2')
-    texts = df.fillna('').astype(str).apply(lambda row: " | ".join(row), axis=1).tolist()
-    embeddings = model.encode(texts, show_progress_bar=True)
-    return embeddings, texts
+    embeddings = model.encode(sequences, show_progress_bar=True)
+    return embeddings
 
-embeddings, texts = embed_dataset(df)
+if uploaded_files:
+    embeddings = embed_sequences(df['sequence'].tolist())
 
 # -----------------------------
 # Persistent AI Memory
@@ -154,12 +89,12 @@ embeddings, texts = embed_dataset(df)
 if 'chat_history' not in st.session_state:
     st.session_state['chat_history'] = []
 
-def ai_chat(question, embeddings, texts, top_k=5):
+def ai_chat(question, embeddings, sequences, top_k=5):
     model = SentenceTransformer('all-MiniLM-L6-v2')
     q_emb = model.encode([question])
     sims = cosine_similarity(q_emb, embeddings)[0]
     top_idx = np.argsort(sims)[-top_k:][::-1]
-    context = "\n".join([texts[i] for i in top_idx])
+    context = "\n".join([sequences[i] for i in top_idx])
     
     prompt = f"""
     You are an intelligent eDNA assistant.
@@ -181,33 +116,20 @@ def ai_chat(question, embeddings, texts, top_k=5):
     st.session_state['chat_history'].append({"Q": question, "A": answer})
     return answer
 
-st.subheader("💬 AI Chatbot for eDNA Analysis")
-user_question = st.text_input("Ask the AI about your dataset")
-if user_question:
-    answer = ai_chat(user_question, embeddings, texts)
+st.subheader("💬 AI Chatbot for eDNA Sequences")
+user_question = st.text_input("Ask the AI about your sequences")
+if uploaded_files and user_question:
+    answer = ai_chat(user_question, embeddings, df['sequence'].tolist())
     st.write("**AI Answer:**", answer)
-
-# -----------------------------
-# Quick Analysis
-# -----------------------------
-st.subheader("🔍 Quick Analysis")
-if st.button("Top 20 Species Count"):
-    if 'species' in df.columns:
-        st.bar_chart(df['species'].value_counts().head(20))
-    else:
-        st.write("No species column found.")
-
-if st.button("Dataset Summary"):
-    st.write(df.describe(include='all'))
 
 # -----------------------------
 # Downloadable Results
 # -----------------------------
-st.subheader("📥 Export Data")
-csv = df.to_csv(index=False).encode('utf-8')
-st.download_button(
-    label="Download Dataset CSV",
-    data=csv,
-    file_name='edna_analysis.csv',
-    mime='text/csv',
-)
+if uploaded_files:
+    csv = df.to_csv(index=False).encode('utf-8')
+    st.download_button(
+        label="Download Dataset CSV",
+        data=csv,
+        file_name='edna_fasta_analysis.csv',
+        mime='text/csv',
+    )
