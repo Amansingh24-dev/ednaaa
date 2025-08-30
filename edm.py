@@ -105,7 +105,7 @@ embeddings = embed_sequences(df['sequence'].tolist()) if not df.empty else None
 if 'chat_history' not in st.session_state:
     st.session_state['chat_history'] = []
 
-def ai_chat(question, embeddings, sequences, top_k=5):
+ def ai_chat(question, embeddings, sequences, top_k=5):
     if embeddings is None or len(sequences) == 0:
         return "No sequences available to answer."
     
