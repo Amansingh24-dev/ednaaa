@@ -8,3 +8,4 @@ openai
 sentence-transformers
 torch
 plotly
+biopython
