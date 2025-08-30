@@ -64,7 +64,7 @@ if 'species' in df.columns:
         df = df[df['species'].isin(species_filter)]
 if 'year' in df.columns:
    # ---- Year Filter (Fixed) ----
-if 'year' in df.columns:
+ if 'year' in df.columns:
     # Ensure numeric
     df['year'] = pd.to_numeric(df['year'], errors='coerce')
     df = df.dropna(subset=['year'])
