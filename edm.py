@@ -59,11 +59,21 @@ else:
 # Sequence Filters
 # -----------------------------
 st.sidebar.subheader("Filters")
-if uploaded_files:
+if uploaded_files and not df.empty:
     min_len = int(df['length'].min())
     max_len = int(df['length'].max())
-    length_filter = st.sidebar.slider("Sequence length range", min_value=min_len, max_value=max_len, value=(min_len, max_len))
-    df = df[df['length'].between(*length_filter)]
+    
+    if min_len == max_len:
+        st.sidebar.write(f"All sequences have length: {min_len}")
+        length_filter = (min_len, max_len)
+    else:
+        length_filter = st.sidebar.slider(
+            "Sequence length range", 
+            min_value=min_len, 
+            max_value=max_len, 
+            value=(min_len, max_len)
+        )
+        df = df[df['length'].between(*length_filter)]
 
 # -----------------------------
 # Quick Stats
