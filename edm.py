@@ -28,8 +28,13 @@ uploaded_files = st.sidebar.file_uploader(
 # -----------------------------
 # Parse FASTA
 # -----------------------------
-def parse_fasta(file):
-    records = list(SeqIO.parse(file, "fasta"))
+import io
+
+def parse_fasta(uploaded_file):
+    # Convert uploaded bytes file to text
+    fasta_text = io.StringIO(uploaded_file.getvalue().decode("utf-8"))
+    records = list(SeqIO.parse(fasta_text, "fasta"))
+    
     data = {
         "id": [rec.id for rec in records],
         "description": [rec.description for rec in records],
@@ -38,6 +43,7 @@ def parse_fasta(file):
         "GC_content": [100 * (rec.seq.count("G") + rec.seq.count("C")) / len(rec.seq) for rec in records]
     }
     return pd.DataFrame(data)
+
 
 dfs = []
 if uploaded_files:
