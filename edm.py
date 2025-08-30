@@ -5,6 +5,7 @@ import numpy as np
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 import openai
+import io
 
 # -----------------------------
 # OpenAI API Key
@@ -28,10 +29,7 @@ uploaded_files = st.sidebar.file_uploader(
 # -----------------------------
 # Parse FASTA
 # -----------------------------
-import io
-
 def parse_fasta(uploaded_file):
-    # Convert uploaded bytes file to text
     fasta_text = io.StringIO(uploaded_file.getvalue().decode("utf-8"))
     records = list(SeqIO.parse(fasta_text, "fasta"))
     
@@ -44,7 +42,9 @@ def parse_fasta(uploaded_file):
     }
     return pd.DataFrame(data)
 
-
+# -----------------------------
+# Load Data
+# -----------------------------
 dfs = []
 if uploaded_files:
     for f in uploaded_files:
@@ -53,13 +53,14 @@ if uploaded_files:
     st.subheader(f"Combined FASTA Dataset Preview ({len(df)} sequences)")
     st.dataframe(df.head())
 else:
+    df = pd.DataFrame()
     st.warning("Please upload at least one FASTA file.")
 
 # -----------------------------
 # Sequence Filters
 # -----------------------------
 st.sidebar.subheader("Filters")
-if uploaded_files and not df.empty:
+if not df.empty:
     min_len = int(df['length'].min())
     max_len = int(df['length'].max())
     
@@ -73,12 +74,12 @@ if uploaded_files and not df.empty:
             max_value=max_len, 
             value=(min_len, max_len)
         )
-        df = df[df['length'].between(*length_filter)]
+    df = df[df['length'].between(*length_filter)]
 
 # -----------------------------
 # Quick Stats
 # -----------------------------
-if uploaded_files:
+if not df.empty:
     st.subheader("📊 Sequence Statistics")
     st.write(f"Total sequences: {len(df)}")
     st.write(f"Average length: {df['length'].mean():.2f}")
@@ -96,8 +97,7 @@ def embed_sequences(sequences):
     embeddings = model.encode(sequences, show_progress_bar=True)
     return embeddings
 
-if uploaded_files:
-    embeddings = embed_sequences(df['sequence'].tolist())
+embeddings = embed_sequences(df['sequence'].tolist()) if not df.empty else None
 
 # -----------------------------
 # Persistent AI Memory
@@ -106,6 +106,9 @@ if 'chat_history' not in st.session_state:
     st.session_state['chat_history'] = []
 
 def ai_chat(question, embeddings, sequences, top_k=5):
+    if embeddings is None or len(sequences) == 0:
+        return "No sequences available to answer."
+    
     model = SentenceTransformer('all-MiniLM-L6-v2')
     q_emb = model.encode([question])
     sims = cosine_similarity(q_emb, embeddings)[0]
@@ -113,39 +116,3 @@ def ai_chat(question, embeddings, sequences, top_k=5):
     context = "\n".join([sequences[i] for i in top_idx])
     
     prompt = f"""
-    You are an intelligent eDNA assistant.
-    Use ONLY the context below to answer questions.
-    CONTEXT:
-    {context}
-
-    Previous chats: {st.session_state['chat_history']}
-
-    QUESTION:
-    {question}
-    """
-    response = openai.ChatCompletion.create(
-        model="gpt-4",
-        messages=[{"role":"user", "content": prompt}],
-        temperature=0
-    )
-    answer = response.choices[0].message.content
-    st.session_state['chat_history'].append({"Q": question, "A": answer})
-    return answer
-
-st.subheader("💬 AI Chatbot for eDNA Sequences")
-user_question = st.text_input("Ask the AI about your sequences")
-if uploaded_files and user_question:
-    answer = ai_chat(user_question, embeddings, df['sequence'].tolist())
-    st.write("**AI Answer:**", answer)
-
-# -----------------------------
-# Downloadable Results
-# -----------------------------
-if uploaded_files:
-    csv = df.to_csv(index=False).encode('utf-8')
-    st.download_button(
-        label="Download Dataset CSV",
-        data=csv,
-        file_name='edna_fasta_analysis.csv',
-        mime='text/csv',
-    )
