@@ -100,32 +100,23 @@ def embed_sequences(sequences):
 embeddings = embed_sequences(df['sequence'].tolist()) if not df.empty else None
 
 # -----------------------------
-# Persistent AI Memory
+# Persistent AI Memory and Chat Function
 # -----------------------------
 if 'chat_history' not in st.session_state:
     st.session_state['chat_history'] = []
 
- def ai_chat(question, embeddings, sequences, top_k=5):
+def ai_chat(question, embeddings, sequences, top_k=5):
     if embeddings is None or len(sequences) == 0:
         return "No sequences available to answer."
-    
-    model = SentenceTransformer('all-MiniLM-L6-v2')
-    q_emb = model.encode([question])
-    sims = cosine_similarity(q_emb, embeddings)[0]
-    top_idx = np.argsort(sims)[-top_k:][::-1]
-    context = "\n".join([sequences[i] for i in top_idx])
-    
-   def ai_chat(question, embeddings, sequences, top_k=5):
-     if embeddings is None or len(sequences) == 0:
-        return "No sequences available to answer."
 
+    # Encode question and compute similarity
     model = SentenceTransformer('all-MiniLM-L6-v2')
     q_emb = model.encode([question])
     sims = cosine_similarity(q_emb, embeddings)[0]
     top_idx = np.argsort(sims)[-top_k:][::-1]
     context = "\n".join([sequences[i] for i in top_idx])
 
-    # Properly closed triple-quoted f-string
+    # Properly closed f-string prompt
     prompt = f"""You are an intelligent eDNA assistant.
 Use ONLY the context below to answer questions.
 CONTEXT:
@@ -136,7 +127,7 @@ Previous chats: {st.session_state['chat_history']}
 QUESTION:
 {question}"""
 
-    # Updated OpenAI API call
+    # OpenAI API call
     response = openai.chat.completions.create(
         model="gpt-4",
         messages=[{"role": "user", "content": prompt}],
@@ -146,17 +137,23 @@ QUESTION:
     st.session_state['chat_history'].append({"Q": question, "A": answer})
     return answer
 
-Previous chats: {st.session_state['chat_history']}
+# -----------------------------
+# AI Chatbot UI
+# -----------------------------
+st.subheader("💬 AI Chatbot for eDNA Sequences")
+user_question = st.text_input("Ask the AI about your sequences")
+if uploaded_files and user_question:
+    answer = ai_chat(user_question, embeddings, df['sequence'].tolist())
+    st.write("**AI Answer:**", answer)
 
-QUESTION:
-{question}"""
-
-    # New OpenAI API call
-    response = openai.chat.completions.create(
-        model="gpt-4",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0
+# -----------------------------
+# Downloadable Results
+# -----------------------------
+if not df.empty:
+    csv = df.to_csv(index=False).encode('utf-8')
+    st.download_button(
+        label="Download Dataset CSV",
+        data=csv,
+        file_name='edna_fasta_analysis.csv',
+        mime='text/csv',
     )
-    answer = response.choices[0].message.content
-    st.session_state['chat_history'].append({"Q": question, "A": answer})
-    return answer
