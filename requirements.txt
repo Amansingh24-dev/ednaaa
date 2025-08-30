@@ -8,5 +8,5 @@ openai
 sentence-transformers
 torch
 plotly
-biopython
+biopython==1.80
 openpyxl
