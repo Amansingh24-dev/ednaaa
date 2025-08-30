@@ -1,5 +1,6 @@
 import streamlit as st
 from Bio import SeqIO
+from Bio.SeqUtils import molecular_weight, MeltingTemp as mt
 import pandas as pd
 import numpy as np
 from sentence_transformers import SentenceTransformer
@@ -10,7 +11,7 @@ import io
 # -----------------------------
 # OpenAI API Key
 # -----------------------------
-openai.api_key = st.secrets.get("OPENAI_API_KEY", "")
+openai.api_key = st.secrets["OPENAI_API_KEY"]
 
 # -----------------------------
 # Page Config
@@ -32,7 +33,7 @@ uploaded_files = st.sidebar.file_uploader(
 )
 
 # -----------------------------
-# Parse FASTA
+# Parse FASTA with extended features
 # -----------------------------
 def parse_fasta(file):
     try:
@@ -45,7 +46,12 @@ def parse_fasta(file):
             "Description": [rec.description for rec in records],
             "Sequence": [str(rec.seq) for rec in records],
             "Length": [len(rec.seq) for rec in records],
-            "GC_Content": [100 * (rec.seq.count("G") + rec.seq.count("C")) / len(rec.seq) for rec in records]
+            "GC_Content": [100 * (rec.seq.count("G") + rec.seq.count("C")) / len(rec.seq) for rec in records],
+            "AT_Content": [100 * (rec.seq.count("A") + rec.seq.count("T")) / len(rec.seq) for rec in records],
+            "N_Content": [100 * rec.seq.count("N") / len(rec.seq) for rec in records],
+            "Molecular_Weight": [molecular_weight(rec.seq, "DNA") for rec in records],
+            "Tm_Wallace": [mt.Tm_Wallace(rec.seq) for rec in records],
+            "Reverse_Complement": [str(rec.seq.reverse_complement()) for rec in records]
         }
         return pd.DataFrame(data)
     except Exception as e:
@@ -78,44 +84,48 @@ if not df.empty:
     st.sidebar.write(f"GC Content range: {df['GC_Content'].min():.2f}% - {df['GC_Content'].max():.2f}%")
 
 # -----------------------------
-# Quick Stats
+# Tabs for Stats, Sequences, AI
 # -----------------------------
 if not df.empty:
-    st.subheader("📊 Sequence Statistics")
-    st.markdown(f"- Total sequences: **{len(df)}**")
-    st.markdown(f"- Average length: **{df['Length'].mean():.2f}**")
-    st.markdown(f"- Average GC content: **{df['GC_Content'].mean():.2f}%**")
-    
-    st.subheader("Top 20 Longest Sequences")
-    st.bar_chart(df.sort_values("Length", ascending=False).head(20)[["Length"]])
+    tabs = st.tabs(["📊 Stats", "🧬 Sequences", "💬 AI Chatbot"])
 
-# -----------------------------
-# Embeddings
-# -----------------------------
-@st.cache_resource
-def embed_sequences(sequences):
-    model = SentenceTransformer('all-MiniLM-L6-v2')
-    return model.encode(sequences, show_progress_bar=True)
+    with tabs[0]:
+        st.subheader("Sequence Statistics")
+        st.markdown(f"- Total sequences: **{len(df)}**")
+        st.markdown(f"- Average length: **{df['Length'].mean():.2f}**")
+        st.markdown(f"- Average GC content: **{df['GC_Content'].mean():.2f}%**")
+        st.markdown(f"- Average AT content: **{df['AT_Content'].mean():.2f}%**")
+        st.markdown(f"- Average N content: **{df['N_Content'].mean():.2f}%**")
+        st.markdown(f"- Average Molecular Weight: **{df['Molecular_Weight'].mean():.2f} Da**")
+        st.markdown(f"- Average Melting Temp (Tm): **{df['Tm_Wallace'].mean():.2f} °C**")
+        st.subheader("Top 20 Longest Sequences")
+        st.bar_chart(df.sort_values("Length", ascending=False).head(20)[["Length"]])
 
-embeddings = embed_sequences(df['Sequence'].tolist()) if not df.empty else None
+    with tabs[1]:
+        st.subheader("Sequences Preview")
+        st.dataframe(df)
 
-# -----------------------------
-# AI Chatbot
-# -----------------------------
-if 'chat_history' not in st.session_state:
-    st.session_state['chat_history'] = []
+    with tabs[2]:
+        st.subheader("AI Chatbot for eDNA Sequences")
+        if 'chat_history' not in st.session_state:
+            st.session_state['chat_history'] = []
 
-def ai_chat(question, embeddings, sequences, top_k=5):
-    if embeddings is None or len(sequences) == 0:
-        return "No sequences available to answer."
-    
-    model = SentenceTransformer('all-MiniLM-L6-v2')
-    q_emb = model.encode([question])
-    sims = cosine_similarity(q_emb, embeddings)[0]
-    top_idx = np.argsort(sims)[-top_k:][::-1]
-    context = "\n".join([sequences[i] for i in top_idx])
-    
-    prompt = f"""
+        @st.cache_resource
+        def embed_sequences(sequences):
+            model = SentenceTransformer('all-MiniLM-L6-v2')
+            return model.encode(sequences, show_progress_bar=True)
+
+        embeddings = embed_sequences(df['Sequence'].tolist())
+
+        user_question = st.text_input("Ask questions about your sequences")
+        if user_question:
+            def ai_chat(question, embeddings, sequences, top_k=5):
+                model = SentenceTransformer('all-MiniLM-L6-v2')
+                q_emb = model.encode([question])
+                sims = cosine_similarity(q_emb, embeddings)[0]
+                top_idx = np.argsort(sims)[-top_k:][::-1]
+                context = "\n".join([sequences[i] for i in top_idx])
+                prompt = f"""
 You are an intelligent eDNA assistant.
 Use ONLY the context below to answer questions.
 CONTEXT:
@@ -126,32 +136,20 @@ Previous chats: {st.session_state['chat_history']}
 QUESTION:
 {question}
 """
-    try:
-        response = openai.chat.completions.create(
-         model="gpt-3.5-turbo",
-          messages=[{"role": "user", "content": prompt}],
-           temperature=0
-        )
+                try:
+                    response = openai.chat.completions.create(
+                        model="gpt-3.5-turbo",
+                        messages=[{"role": "user", "content": prompt}],
+                        temperature=0
+                    )
+                    answer = response.choices[0].message.content
+                    st.session_state['chat_history'].append({"Q": question, "A": answer})
+                    return answer
+                except Exception as e:
+                    return f"OpenAI API Error: {e}"
 
-        answer = response.choices[0].message.content
-        st.session_state['chat_history'].append({"Q": question, "A": answer})
-        return answer
-    except Exception as e:
-        return f"OpenAI API Error: {e}"
-
-# -----------------------------
-# AI Chatbot UI
-# -----------------------------
-st.subheader("💬 AI Chatbot for eDNA Sequences")
-user_question = st.text_input("Ask questions about your sequences")
-if uploaded_files and user_question:
-    answer = ai_chat(user_question, embeddings, df['Sequence'].tolist())
-    st.markdown(f"**AI Answer:** {answer}")
-
-# -----------------------------
-# Downloadable Results
-# -----------------------------
-import io
+            answer = ai_chat(user_question, embeddings, df['Sequence'].tolist())
+            st.markdown(f"**AI Answer:** {answer}")
 
 # -----------------------------
 # Downloadable Results
@@ -170,8 +168,7 @@ if not df.empty:
     excel_buffer = io.BytesIO()
     with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
         df.to_excel(writer, index=False, sheet_name='eDNA_Analysis')
-    excel_buffer.seek(0)  # Move pointer to the start
-
+    excel_buffer.seek(0)
     st.download_button(
         label="Download Dataset Excel",
         data=excel_buffer,
